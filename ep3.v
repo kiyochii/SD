@@ -9,10 +9,20 @@ module bcd_divider(
     output end_division    // Finish signal
 );
 
-    wire muxr, muxq;
-    wire loadq, loadr;
-    wire rged;
+    wire rged, muxr, muxq, loadq, loadr;
     //so inicializa
+    bcd_divider_control uc (
+        .start(start),
+        .rged(rged),
+        .clk(clk),
+        .rst(rst),
+        .muxr(muxr),
+        .muxq(muxq),
+        .loadq(loadq),
+        .loadr(loadr),
+        .end_division(end_division)
+    );
+
     bcd_divider_df dataflow (
         .dividend(dividend),
         .divisor(divisor),
@@ -27,17 +37,6 @@ module bcd_divider(
         .rged(rged)
     );
 
-    bcd_divider_uc control (
-        .start(start),
-        .rged(rged),
-        .clk(clk),
-        .rst(rst),
-        .muxr(muxr),
-        .muxq(muxq),
-        .loadq(loadq),
-        .loadr(loadr),
-        .end_division(end_division)
-    );
 
 endmodule
 
@@ -68,15 +67,15 @@ module bcd_divider_df (
     assign addA = quotient;
     bcd_subtractor_4digits subtrator
     (
-        .a(subA),
+        .a(remainder),
         .b(divisor),
         .bin(1'b0),
         .diff(subtractorResult),
         .bout(bout)
     );
-    bcd_adder_4digits somador(
-
-        .a(addA),
+    bcd_adder_4digits somador
+    (
+        .a(quotient),
         .b(16'b0001),
         .cin(1'b0),
         .sum(sumResult),
@@ -86,7 +85,7 @@ module bcd_divider_df (
     assign muxQresult = muxq ? sumResult : 16'b0;
     assign muxRresult = muxr ? subtractorResult : dividend;
     bcd_comparator_4digits comparador(
-        .a(quotient),
+        .a(remainder),
         .b(divisor),
         .a_ge_b(rged)
     );
@@ -99,84 +98,89 @@ module bcd_divider_df (
         end
         else 
         begin
-        if(loadr)
+        if (loadr)
         remainder <= muxRresult;
-         if(loadq)
+         if (loadq)
         quotient <= muxQresult;
         end
     end
-
-   
 endmodule
 
-
-
-module bcd_divider_uc (
-    input start,      
-    input rged,        
-    input clk,        
-    input rst,        
-    output reg muxr,   
-    output reg muxq,   
-    output reg loadq,  
-    output reg loadr, 
-    output reg end_division 
+module bcd_divider_control(
+    input start,        // Start signal
+    input rged,         // GE signal
+    input clk,          // Clock signal
+    input rst,          // Reset signal
+    output reg muxr,    // Mux select signal for dividend
+    output reg muxq,    // Mux select signal for quotient
+    output reg loadq,   // Load signal for quotient
+    output reg loadr,   // Load signal for remainder
+    output reg end_division // Finish signal
 );
 
-    reg [1:0] state, next_state;
+localparam parado = 2'b00;
+localparam processando = 2'b01;
+localparam termino = 2'b10;
 
-    localparam IDLE = 2'b00;
-    localparam PROCESS = 2'b01;
-    localparam FINISH = 2'b10;
+reg [1:0] atual, proximo;
 
-    always @(posedge clk or posedge rst) begin
-        if (rst)
-            state <= IDLE;
-        else
-            state <= next_state;
-    end
+always @(posedge clk or posedge rst) begin
+    if (rst)
+        atual <= parado;
+    else
+        atual <= proximo; // Atualiza o estado na borda de subida do clock
+end
 
-    always @(*) begin
-        case (state)
-            IDLE: next_state = start ? PROCESS : IDLE;
-            PROCESS: next_state = (rged ? PROCESS : FINISH);
-            FINISH: next_state = IDLE;
-            default: next_state = IDLE;
-        endcase
-    end
+// Determinação do próximo estado
+always @(atual, start, rged) begin
+    case (atual)
+        parado: proximo = start ? processando : parado;
+        processando: proximo = rged ? processando : termino;
+        termino: proximo = parado;
+        default: proximo = parado;
+    endcase
+end
 
-    always @(*) begin
+// Definição das saídas baseadas no estado atual
+always @(*) begin
+    // Resetando os sinais
+    muxr = 0;
+    muxq = 0;
+    loadq = 0;
+    loadr = 0;
+    end_division = 0;
 
-        muxr = 0;
-        muxq = 0;
-        loadq = 0;
-        loadr = 0;
-        end_division = 0;
-
-        case (state)
-            IDLE: begin
-                muxr = 0; 
-                muxq = 0;  
-                loadr = 1; // Carregar o dividendo inicial no resto
+    case (atual)
+        parado: begin
+            muxr = 0;
+            muxq = 0;
+            loadr = 1; 
+            loadq = 1;
+        end
+        processando: begin
+            muxq = 1;
+            if (rged) begin
+                loadr = 1;
+                loadq = 1;
+            end else begin
+                loadr = 0;
                 loadq = 0;
             end
-            PROCESS: begin
-                muxr = 1; 
-                muxq = rged; // Incrementar quociente se remainder >= divisor
-                loadr = 1; // Atualizar remainder
-                loadq = rged; // Atualizar quociente se rged for verdadeiro
-            end
-            FINISH: begin
-                end_division = 1; 
-            end
-        endcase
-    end
+            muxr = rged;
+        end
+        termino: begin
+            loadr = 0;
+            loadq = 0;
+         
+            end_division = 1; // Sinaliza o término da divisão
+        end
+    endcase
+end
 
 endmodule
 
 
-module bcd_adder_4digits 
-(
+module bcd_adder_4digits (
 input [15:0] a, // Adendo A de 4 d´ıgitos BCD
 input [15:0] b, // Adendo B de 4 d´ıgitos BCD
 input cin, // Carry-in BCD
@@ -221,6 +225,89 @@ bcd_adder quarto (
 
 assign sum = {sum_3, sum_2, sum_1, sum_0};
 assign cout = carry_3;
+
+endmodule
+
+
+module somadorCompleto(
+    input [0:0]a,
+    input [0:0]b,
+    input [0:0]cin,
+    output cout,
+    output res
+);
+assign cout = (a&b)|(a&cin)|(b&cin);
+assign res = a ^ b ^ cin;
+
+endmodule
+
+module somador4bits(
+    input [3:0]s1,
+    input [3:0]s2,
+    input [0:0]cin,
+    output [0:0]cout,
+    output [3:0]res
+);
+
+wire aux [3:0];
+genvar i;
+generate
+    for(i = 0; i < 4; i = i+1) begin
+        if(i == 0) begin
+            somadorCompleto fa(
+                s1[0],
+                s2[0],
+                cin[0],
+                aux[0],
+                res[0]
+            );
+        end
+        else begin
+            somadorCompleto fa(
+                s1[i],
+                s2[i],
+                aux[i-1],
+                aux[i],
+                res[i]
+            );
+        end
+    end
+endgenerate
+assign cout = aux[3];
+endmodule
+
+
+module bcd_adder(
+input [3:0]num1,
+input [3:0]num2,
+input cin,
+output cout,
+output [3:0] res
+);
+
+wire [3:0] soma;
+wire carrysum;
+wire carrybcd;
+wire verificador;
+
+somador4bits antes(
+    num1,
+    num2,
+    cin,
+    carrysum,
+    soma
+);
+
+assign verificador = ((soma > 4'b1001) || carrysum);
+
+somador4bits corrigido(
+    soma,
+    verificador ? 4'b0110 : 4'b0000,
+    1'b0,
+    carrybcd,
+    res
+);
+assign cout = carrysum || carrybcd;
 
 endmodule
 
@@ -319,7 +406,6 @@ module bcd_subtractor(
 
 endmodule
 
-
 module bcd_comparator_4digits (
     input [15:0] a, // A: número BCD de 4 dígitos
     input [15:0] b, // B: número BCD de 4 dígitos
@@ -337,87 +423,5 @@ module bcd_comparator_4digits (
     assign i2 = (i1 && (a[7:4] == b[7:4]));
 
     assign a_ge_b = t0 || (i0 && t1) || (i1 && t2) || (i2 && (t3 || (a[3:0] == b[3:0])));
-
-endmodule
-
-module somadorCompleto(
-    input [0:0]a,
-    input [0:0]b,
-    input [0:0]cin,
-    output cout,
-    output res
-);
-assign cout = (a&b)|(a&cin)|(b&cin);
-assign res = a ^ b ^ cin;
-
-endmodule
-
-module somador4bits(
-    input [3:0]s1,
-    input [3:0]s2,
-    input [0:0]cin,
-    output [0:0]cout,
-    output [3:0]res
-);
-
-wire aux [3:0];
-genvar i;
-generate
-    for(i = 0; i < 4; i = i+1) begin
-        if(i == 0) begin
-            somadorCompleto fa(
-                s1[0],
-                s2[0],
-                cin[0],
-                aux[0],
-                res[0]
-            );
-        end
-        else begin
-            somadorCompleto fa(
-                s1[i],
-                s2[i],
-                aux[i-1],
-                aux[i],
-                res[i]
-            );
-        end
-    end
-endgenerate
-assign cout = aux[3];
-endmodule
-
-
-module bcd_adder(
-input [3:0]num1,
-input [3:0]num2,
-input cin,
-output cout,
-output [3:0] res
-);
-
-wire [3:0] soma;
-wire carrysum;
-wire carrybcd;
-wire verificador;
-
-somador4bits antes(
-    num1,
-    num2,
-    cin,
-    carrysum,
-    soma
-);
-
-assign verificador = ((soma > 4'b1001) || carrysum);
-
-somador4bits corrigido(
-    soma,
-    verificador ? 4'b0110 : 4'b0000,
-    1'b0,
-    carrybcd,
-    res
-);
-assign cout = carrysum || carrybcd;
 
 endmodule
