@@ -128,10 +128,10 @@ always @(posedge clk or posedge rst) begin
     if (rst)
         atual <= parado;
     else
-        atual <= proximo; // Atualiza o estado na borda de subida do clock
+        atual <= proximo; 
 end
 
-// Determinação do próximo estado
+
 always @(atual, start, rged) begin
     case (atual)
         parado: proximo = start ? processando : parado;
@@ -141,9 +141,8 @@ always @(atual, start, rged) begin
     endcase
 end
 
-// Definição das saídas baseadas no estado atual
 always @(*) begin
-    // Resetando os sinais
+
     muxr = 0;
     muxq = 0;
     loadq = 0;
@@ -172,7 +171,7 @@ always @(*) begin
             loadr = 0;
             loadq = 0;
          
-            end_division = 1; // Sinaliza o término da divisão
+            end_division = 1; 
         end
     endcase
 end
